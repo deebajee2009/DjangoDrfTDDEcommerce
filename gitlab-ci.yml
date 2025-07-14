@@ -1,0 +1,153 @@
+stages:
+  - lint
+  - test-fast
+  - test-unit
+  - test-integration
+  - test-security
+  - test-full
+  - test-extended
+
+variables:
+  POSTGRES_DB: test_db
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: postgres
+  DATABASE_URL: postgresql://postgres:postgres@postgres:5432/test_db
+  REDIS_URL: redis://redis:6379/0
+
+.python-template: &python-template
+  image: python:3.10
+  cache:
+    paths:
+      - ~/.cache/pip/
+  before_script:
+    - pip install --upgrade pip
+    - pip install -r requirements.txt
+
+lint:
+  <<: *python-template
+  stage: lint
+  script:
+    - flake8 apps tests
+    - black --check apps tests
+    - isort --check-only apps tests
+    - bandit -r apps
+    - safety check
+
+test-fast:
+  <<: *python-template
+  stage: test-fast
+  services:
+    - postgres:13
+    - redis:6
+  script:
+    - pytest -m "fast" --maxfail=10 --tb=short
+  artifacts:
+    reports:
+      junit: reports/pytest_report.xml
+    paths:
+      - reports/
+    expire_in: 1 week
+
+test-unit:
+  <<: *python-template
+  stage: test-unit
+  services:
+    - postgres:13
+    - redis:6
+  script:
+    - pytest -m "unit and not slow" --maxfail=5
+  artifacts:
+    reports:
+      junit: reports/pytest_report.xml
+    paths:
+      - reports/
+    expire_in: 1 week
+
+test-integration:
+  <<: *python-template
+  stage: test-integration
+  services:
+    - postgres:13
+    - redis:6
+  script:
+    - pytest -m "integration" --maxfail=3
+  artifacts:
+    reports:
+      junit: reports/pytest_report.xml
+    paths:
+      - reports/
+    expire_in: 1 week
+
+test-security:
+  <<: *python-template
+  stage: test-security
+  services:
+    - postgres:13
+    - redis:6
+  script:
+    - pytest -m "security" --maxfail=2
+  artifacts:
+    reports:
+      junit: reports/pytest_report.xml
+    paths:
+      - reports/
+    expire_in: 1 week
+
+test-full:
+  <<: *python-template
+  stage: test-full
+  services:
+    - postgres:13
+    - redis:6
+  script:
+    - pytest --cov-fail-under=90
+  coverage: '/TOTAL.*\s+(\d+%)$/'
+  artifacts:
+    reports:
+      junit: reports/pytest_report.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+    paths:
+      - reports/
+      - htmlcov/
+    expire_in: 1 month
+
+# Extended tests (run on main branch only)
+test-performance:
+  <<: *python-template
+  stage: test-extended
+  services:
+    - postgres:13
+    - redis:6
+  script:
+    - pytest -m "performance" --maxfail=2
+  only:
+    - main
+  allow_failure: true
+
+test-e2e:
+  <<: *python-template
+  stage: test-extended
+  services:
+    - postgres:13
+    - redis:6
+  script:
+    - pytest -m "e2e" --maxfail=1
+  only:
+    - main
+  allow_failure: true
+
+# Tox comprehensive testing
+test-tox:
+  image: python:3.10
+  stage: test-extended
+  services:
+    - postgres:13
+    - redis:6
+  script:
+    - pip install tox
+    - tox -e py310-django42
+  only:
+    - main
+  allow_failure: true
